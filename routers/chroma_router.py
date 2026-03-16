@@ -7,6 +7,10 @@ from pypdf import PdfReader
 from services.chunk_service import chunk_text
 from services.llm_service import ask_claude
 from agents.claude_agent import agent
+from memory.memory_manager import MemoryManager
+from agents.claude_agent import llm
+
+memory = MemoryManager(llm=llm)
 
 router = APIRouter(
     prefix="/chroma",
@@ -104,14 +108,45 @@ def ask_question(query: str):
 
 
 @router.get("/ask-agent")
-def ask_agent(query: str):
+def ask_agent(query: str, thread_id: str, user_id: int, workspace_id: Optional[str] = Header(..., alias="X-Workspace-Id")):
+
+    config = {
+        "configurable": {
+            "thread_id": thread_id,
+            "workspace_id": workspace_id
+        }
+    }
+    
+    # retrieve past memory
+    # past_memory = memory.get_memory(user_id, query)
+    past_memory = memory.retrieve_memory(user_id, query)
+
+    print("past_memory: ", past_memory)
+
+    prompt = f"""
+Relevant past memory:
+{past_memory}
+
+User query:
+{query}
+"""
+
 
     response = agent.invoke({
-        "messages": [("user", query)]
-    })
+        "messages": [
+            # ("user", query)
+            {"role": "user", "content": prompt}
+        ],
+    }, config)
+
+    answer = response["messages"][-1].content
+
+    # save memory
+    # memory.store_memory(user_id, query, answer)
+    memory.add_message(user_id, query, answer)
 
     return {
-        "answer": response["messages"][-1].content
+        "answer": answer
     }
 
 

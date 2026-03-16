@@ -1,9 +1,11 @@
 import os
 from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
 from langchain_anthropic import ChatAnthropic
 from tools.vector_search_tool import vector_search
 from tools.general_llm_tool import general_llm
 from dotenv import load_dotenv
+from tools.db_query_tool import db_query
 
 load_dotenv()
 
@@ -18,6 +20,13 @@ llm = ChatAnthropic(
     api_key=api_key
 )
 
-tools = [vector_search, general_llm]
+tools = [general_llm, db_query, vector_search]
  
-agent = create_react_agent(llm, tools)
+# memory
+memory = MemorySaver()
+
+agent = create_react_agent(
+    llm, 
+    tools,
+    checkpointer=memory
+)
