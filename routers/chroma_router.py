@@ -9,6 +9,7 @@ from services.llm_service import ask_claude
 from agents.claude_agent import agent
 from memory.memory_manager import MemoryManager
 from agents.claude_agent import llm
+from services.llama_index_service import query_engine
 
 memory = MemoryManager(llm=llm)
 
@@ -62,10 +63,15 @@ async def upload_pdf(file: UploadFile, workspace_id: Optional[str] = Header(None
     ),
 )
 def ask_question(query: str, workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id")):
+    
+    response = query_engine.query(query)
+
+    return str(response)
 
     if workspace_id is None:
         return {"error": "Workspace ID is required"}
 
+    
     embedding = create_embedding(query)
 
     results = collection.query(
