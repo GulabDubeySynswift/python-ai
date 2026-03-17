@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, UploadFile, Header
+from fastapi import APIRouter, UploadFile, File, Form, Header
 from database.chroma_client import collection
 from services.embedding_service import create_embedding
 import uuid
@@ -10,6 +10,10 @@ from agents.claude_agent import agent
 from memory.memory_manager import MemoryManager
 from agents.claude_agent import llm
 from services.llama_index_service import query_engine
+import tempfile
+import os
+from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
+from utils.count_tokens import validate_tokens
 
 memory = MemoryManager(llm=llm)
 
@@ -155,6 +159,45 @@ User query:
         "answer": answer
     }
 
+@router.post("/ask-file-agent")
+async def ask_file_agent(
+    file: UploadFile = File(...),
+    query: str = Form(...),
+    thread_id: str = Form(...),
+    user_id: int = Form(...),
+    workspace_id: Optional[str] = Header(..., alias="X-Workspace-Id")
+):
+    # -----------------------------
+    # Save uploaded file temporarily
+    # -----------------------------
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        # -----------------------------
+        # Load & index file (RAG)
+        # -----------------------------
+        documents = SimpleDirectoryReader(input_files=[tmp_path]).load_data()
+
+        validate_tokens(documents)
+
+        index = VectorStoreIndex.from_documents(documents)
+        query_engine = index.as_query_engine()
+
+        # -----------------------------
+        # Query file + agent
+        # -----------------------------
+        file_response = query_engine.query(query)
+        
+        return {
+            "query": query,
+            "file_response": file_response.response
+        }
+
+    finally:
+        # cleanup temp file
+        os.remove(tmp_path)
 
 @router.post(
     "/add-document",

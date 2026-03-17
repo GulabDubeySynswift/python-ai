@@ -4,6 +4,7 @@ from routers import user_router
 from routers import chroma_router
 from routers import chat_router
 from routers import auth_router
+from core.ai_config import init_ai
 
 tags_metadata = [
     {
@@ -37,6 +38,10 @@ app = FastAPI(
 
 Base.metadata.create_all(bind=engine)
 
+
+@app.on_event("startup")
+def startup_event():
+    init_ai()
 
 @app.get("/", tags=["Health"], summary="Health check", description="Simple health-check endpoint to verify the API is running.")
 def get_home():
