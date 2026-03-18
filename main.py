@@ -4,6 +4,7 @@ from routers import user_router
 from routers import chroma_router
 from routers import chat_router
 from routers import auth_router
+from routers import agent_router
 from core.ai_config import init_ai
 
 tags_metadata = [
@@ -52,3 +53,4 @@ app.include_router(auth_router.router)
 app.include_router(user_router.router)
 app.include_router(chroma_router.router)
 app.include_router(chat_router.router)
+app.include_router(agent_router.router)
