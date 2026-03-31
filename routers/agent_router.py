@@ -1,9 +1,12 @@
 from typing import Optional, Any
 
-from fastapi import APIRouter, Form, UploadFile, File
+from fastapi import APIRouter, Depends, Form, UploadFile, File
 import json
 import re
 import chromadb
+from sqlalchemy.orm import Session
+from database.database import SessionLocal
+from repositories.message_repository import MessageRepository
 from services.embedding_service import create_embedding
 import uuid
 from utils.file_to_text import file_to_text
@@ -180,6 +183,14 @@ class ChromaClient:
     def get_document_ids(self):
         return self.collection.get_ids()
 
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+        
 # ✅ Global storage (basic version)
 docBuffers = {}  # key = user_id -> thread_id
 
@@ -297,8 +308,11 @@ async def ask_agent(
         user_id: str = Form(...),
         thread_id: str = Form(...),
         message: str = Form(...),
+        db: Session = Depends(get_db)
     ):
-
+    message_repo = MessageRepository(db)
+    message_repo.save_chat(workspace_id, user_id, thread_id, "user",  {"text": message})
+    
     if user_id not in buffers:
         buffers[user_id] = {}
 
@@ -336,4 +350,60 @@ User Query:
 
     buffer.add(message, answer)
     
+    
+    message_repo.save_chat(workspace_id, user_id, thread_id, "assistant", answer)
+
     return {"message": answer}
+
+
+@router.post("/agent/history")
+async def agent_history(
+        workspace_id: str = Form(...),
+        user_id: str = Form(...),
+        thread_id: str = Form(...),
+        limit: int = Form(100),
+        db: Session = Depends(get_db)
+    ):
+    message_repo = MessageRepository(db)
+    history = message_repo.get_chat_history(workspace_id, user_id, thread_id, limit=limit)
+
+    messages = []
+    for chat in history:
+        if chat.role == "user":
+            text = ""
+            if isinstance(chat.message, dict):
+                text = str(chat.message.get("text", ""))
+            elif isinstance(chat.message, str):
+                text = chat.message
+            messages.append({
+                "role": "user",
+                "content": text
+            })
+        else:
+            messages.append({
+                "role": "assistant",
+                "ui": _coerce_ui_json(chat.message),
+            })
+
+    return {"messages": messages}
+
+
+@router.post("/agent/threads")
+async def agent_threads(
+        workspace_id: str = Form(...),
+        user_id: str = Form(...),
+        limit: int = Form(50),
+        db: Session = Depends(get_db)
+    ):
+    message_repo = MessageRepository(db)
+    rows = message_repo.get_threads(workspace_id, user_id, limit=limit)
+
+    threads = []
+    for row in rows:
+        threads.append({
+            "thread_id": row.thread_id,
+            "message_count": int(row.message_count or 0),
+            "last_message_at": row.last_message_at.isoformat() if row.last_message_at else None,
+        })
+
+    return {"threads": threads}

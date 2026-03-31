@@ -326,6 +326,48 @@
       margin-top: 0.35rem;
       line-height: 1.35;
     }
+    .thread-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      max-height: 13.5rem;
+      overflow-y: auto;
+      padding-right: 0.2rem;
+    }
+    .thread-item {
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      background: rgba(255,255,255,0.02);
+      color: var(--text);
+      padding: 0.45rem 0.5rem;
+      cursor: pointer;
+    }
+    .thread-item:hover { border-color: var(--accent); }
+    .thread-item.active {
+      border-color: var(--accent);
+      background: rgba(16,163,127,0.12);
+    }
+    .thread-item-id {
+      font-size: 0.75rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .thread-item-meta {
+      margin-top: 0.2rem;
+      font-size: 0.65rem;
+      color: var(--muted);
+    }
+    .thread-empty {
+      font-size: 0.72rem;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: 0.5rem;
+      padding: 0.5rem;
+    }
 
     .main {
       flex: 1;
@@ -386,6 +428,14 @@
       font-size: 0.8rem;
     }
     #error-bar.visible { display: block; }
+    .status-bar {
+      margin: 0.45rem 0.75rem 0;
+      font-size: 0.76rem;
+      color: var(--muted);
+      min-height: 1.1rem;
+    }
+    .status-bar.ok { color: #9ed9cc; }
+    .status-bar.warn { color: #fcd34d; }
 
     .chat-scroll {
       flex: 1;
@@ -635,6 +685,7 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
           New chat
         </button>
+        <button type="button" class="btn" id="btn-load-history">Load history</button>
       </div>
       <div class="sb-scroll">
         <div class="sb-section">
@@ -655,15 +706,15 @@
           </div>
           <div class="field">
             <label for="user-id">User ID</label>
-            <input type="text" id="user-id" value="demo-user" />
+            <input type="text" id="user-id" value="1" />
           </div>
           <div class="field">
             <label for="thread-id">Thread ID</label>
-            <input type="text" id="thread-id" value="main" />
+            <input type="text" id="thread-id" value="1" />
           </div>
           <div class="field" id="workspace-field">
             <label for="workspace-id">Workspace ID (assistant)</label>
-            <input type="text" id="workspace-id" value="default-workspace" />
+            <input type="text" id="workspace-id" value="1" />
           </div>
         </div>
         <div class="sb-section" id="upload-section">
@@ -685,6 +736,10 @@
             </div>
           </div>
         </div>
+        <div class="sb-section">
+          <h3>Threads</h3>
+          <div id="thread-list" class="thread-list"></div>
+        </div>
       </div>
     </aside>
 
@@ -697,6 +752,7 @@
         <span class="thread-badge" id="thread-display"></span>
       </header>
       <div id="error-bar"></div>
+      <div id="history-status" class="status-bar" aria-live="polite"></div>
       <div class="chat-scroll" id="chat-scroll">
         <div class="chat-inner" id="chat-log" aria-live="polite">
           <div class="welcome" id="welcome">
@@ -728,7 +784,7 @@
             </div>
           </div>
         </form>
-        <p class="composer-hint">API: <code style="font-size:0.85em;">POST /agent</code> · <code style="font-size:0.85em;">POST /agent/ask</code></p>
+        <p class="composer-hint">API: <code style="font-size:0.85em;">POST /agent</code> · <code style="font-size:0.85em;">POST /agent/ask</code> · <code style="font-size:0.85em;">POST /agent/history</code> · <code style="font-size:0.85em;">POST /agent/threads</code></p>
       </footer>
     </div>
   </div>
@@ -762,10 +818,14 @@
       const composerAttachments = $("composer-attachments");
       const composerFileName = $("composer-file-name");
       const composerFileRemove = $("composer-file-remove");
+      const loadHistoryBtn = $("btn-load-history");
+      const historyStatus = $("history-status");
+      const threadList = $("thread-list");
 
       let mode = "doc";
       let messages = [];
       let selectedFile = null;
+      let threads = [];
 
       const LS = "pdfChatUiPrefs";
 
@@ -802,6 +862,84 @@
         errBar.classList.remove("visible");
         errBar.textContent = "";
       }
+      function setStatus(text, tone) {
+        historyStatus.textContent = text || "";
+        historyStatus.classList.remove("ok", "warn");
+        if (tone) historyStatus.classList.add(tone);
+      }
+
+      function formatDateLike(value) {
+        if (!value) return "";
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return "";
+        return d.toLocaleString();
+      }
+
+      function renderThreads() {
+        const activeThread = $("thread-id").value.trim();
+        if (!threads.length) {
+          threadList.innerHTML = `<div class="thread-empty">No threads found for this user/workspace yet.</div>`;
+          return;
+        }
+        threadList.innerHTML = threads.map((t) => {
+          const isActive = t.thread_id === activeThread;
+          const safeId = escapeHtml(t.thread_id || "");
+          const safeCount = Number(t.message_count || 0);
+          const dt = formatDateLike(t.last_message_at);
+          return `
+            <button type="button" class="thread-item${isActive ? " active" : ""}" data-thread-id="${safeId}">
+              <div class="thread-item-id">${safeId || "(no-id)"}</div>
+              <div class="thread-item-meta">${safeCount} msg${safeCount === 1 ? "" : "s"}${dt ? " · " + escapeHtml(dt) : ""}</div>
+            </button>
+          `;
+        }).join("");
+
+        const buttons = threadList.querySelectorAll(".thread-item");
+        buttons.forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const tid = btn.getAttribute("data-thread-id") || "";
+            if (!tid) return;
+            $("thread-id").value = tid;
+            savePrefs();
+            updateThreadDisplay();
+            loadHistory();
+            closeSidebar();
+          });
+        });
+      }
+
+      async function loadThreads(options = {}) {
+        const silent = !!options.silent;
+        const user_id = $("user-id").value.trim();
+        const workspace_id = $("workspace-id").value.trim();
+        if (!user_id || !workspace_id) {
+          threads = [];
+          renderThreads();
+          if (!silent) setStatus("User ID and Workspace ID are required for thread list.", "warn");
+          return;
+        }
+        try {
+          const fd = new FormData();
+          fd.append("workspace_id", workspace_id);
+          fd.append("user_id", user_id);
+          fd.append("limit", "100");
+          const res = await fetch(baseUrl() + "/agent/threads", { method: "POST", body: fd });
+          const bodyText = await res.text();
+          let data;
+          try { data = JSON.parse(bodyText); } catch {
+            showErr("Bad threads response: " + bodyText.slice(0, 240));
+            return;
+          }
+          if (!res.ok) {
+            showErr(data.detail ? JSON.stringify(data.detail) : res.statusText);
+            return;
+          }
+          threads = Array.isArray(data.threads) ? data.threads : [];
+          renderThreads();
+        } catch (err) {
+          showErr(err.message || String(err));
+        }
+      }
 
       function closeSidebar() {
         sidebar.classList.remove("open");
@@ -831,12 +969,17 @@
         }
         modeDesc.textContent = isDoc
           ? "Upload a PDF (optional after first ingest), ask questions; answers use passages retrieved for this user & thread."
-          : "Messages go to the workspace agent (POST /agent/ask). Set Workspace ID.";
+          : "Messages go to the workspace agent (POST /agent/ask). Pick thread from list to load history.";
         $("top-title").textContent = isDoc ? "Document Q&A" : "Assistant";
+        loadHistoryBtn.disabled = false;
+        if (!isDoc) loadThreads({ silent: true });
         closeSidebar();
       }
       tabDoc.addEventListener("click", () => setMode("doc"));
-      tabAsst.addEventListener("click", () => setMode("asst"));
+      tabAsst.addEventListener("click", () => {
+        setMode("asst");
+        loadHistory({ silent: true });
+      });
 
       function escapeHtml(s) {
         const d = document.createElement("div");
@@ -995,6 +1138,66 @@
         scrollToBottom();
       }
 
+      async function loadHistory(options = {}) {
+        const silent = !!options.silent;
+        clearErr();
+        const user_id = $("user-id").value.trim();
+        const thread_id = $("thread-id").value.trim();
+        const workspace_id = $("workspace-id").value.trim();
+        if (!user_id || !thread_id || !workspace_id) {
+          setStatus("User ID, Workspace ID and Thread ID are required for history.", "warn");
+          return;
+        }
+
+        if (mode !== "asst") {
+          setMode("asst");
+        }
+
+        const prevText = loadHistoryBtn.textContent;
+        loadHistoryBtn.textContent = "Loading...";
+        loadHistoryBtn.disabled = true;
+        if (!silent) setStatus("Loading thread history...", "");
+        try {
+          const fd = new FormData();
+          fd.append("workspace_id", workspace_id);
+          fd.append("user_id", user_id);
+          fd.append("thread_id", thread_id);
+          fd.append("limit", "100");
+          const res = await fetch(baseUrl() + "/agent/history", { method: "POST", body: fd });
+          const bodyText = await res.text();
+          let data;
+          try { data = JSON.parse(bodyText); } catch {
+            showErr("Bad history response: " + bodyText.slice(0, 240));
+            return;
+          }
+          if (!res.ok) {
+            showErr(data.detail ? JSON.stringify(data.detail) : res.statusText);
+            return;
+          }
+          const history = Array.isArray(data.messages) ? data.messages : [];
+          messages = history.map((m) => {
+            if (m.role === "assistant") {
+              const ui = normalizeUiMessage(m.ui || m.content);
+              const conf = ui && ui.meta && ui.meta.confidence ? ui.meta.confidence : "medium";
+              return { role: "assistant", ui, content: "", meta: `Confidence: ${conf}` };
+            }
+            return { role: "user", content: String(m.content || "") };
+          });
+          render();
+          renderThreads();
+          if (history.length) {
+            setStatus(`Loaded ${history.length} messages for thread "${thread_id}".`, "ok");
+          } else {
+            setStatus(`No previous messages found for thread "${thread_id}".`, "warn");
+          }
+        } catch (err) {
+          showErr(err.message || String(err));
+        } finally {
+          loadHistoryBtn.disabled = false;
+          loadHistoryBtn.textContent = prevText;
+        }
+      }
+
       function setLoading(on) {
         const oldLoads = chatLog.querySelectorAll(".loading-row");
         oldLoads.forEach((n) => n.remove());
@@ -1059,13 +1262,28 @@
         render();
         threadDisplay.textContent = "Thread: " + tid;
         clearErr();
+        loadThreads({ silent: true });
         closeSidebar();
       });
+      loadHistoryBtn.addEventListener("click", loadHistory);
 
       function updateThreadDisplay() {
         threadDisplay.textContent = "Thread: " + $("thread-id").value.trim();
       }
       $("thread-id").addEventListener("input", updateThreadDisplay);
+      $("thread-id").addEventListener("change", () => {
+        updateThreadDisplay();
+        renderThreads();
+        if (mode === "asst") loadHistory({ silent: true });
+      });
+      $("workspace-id").addEventListener("change", () => {
+        loadThreads({ silent: true });
+        if (mode === "asst") loadHistory({ silent: true });
+      });
+      $("user-id").addEventListener("change", () => {
+        loadThreads({ silent: true });
+        if (mode === "asst") loadHistory({ silent: true });
+      });
       updateThreadDisplay();
 
       form.addEventListener("submit", async (e) => {
@@ -1122,6 +1340,8 @@
             messages.push({ role: "assistant", ui, content: "", meta: `Confidence: ${conf}` });
             setLoading(false);
             render();
+            loadThreads({ silent: true });
+            loadHistory();
           } else {
             const fd = new FormData();
             fd.append("workspace_id", workspace_id);
@@ -1182,7 +1402,9 @@
 
       loadPrefs();
       setMode("doc");
+      loadThreads({ silent: true });
       render();
+      setStatus('Select thread and click "Load history".', "");
       msgInput.focus();
     })();
   </script>
