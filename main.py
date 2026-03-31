@@ -1,4 +1,9 @@
-from fastapi import FastAPI
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.responses import HTMLResponse
 from database.database import engine, Base
 from routers import user_router
 from routers import chroma_router
@@ -44,7 +49,15 @@ Base.metadata.create_all(bind=engine)
 def startup_event():
     init_ai()
 
-@app.get("/", tags=["Health"], summary="Health check", description="Simple health-check endpoint to verify the API is running.")
+# ✅ Templates (HTML support)
+templates = Jinja2Templates(directory="templates")
+
+# ✅ Home route (HTML)
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+    
+@app.get("/api", tags=["Health"], summary="Health check", description="Simple health-check endpoint to verify the API is running.")
 def get_home():
     return {"message": "Hello World"}
 
