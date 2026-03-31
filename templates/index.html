@@ -833,9 +833,9 @@
         try {
           const p = JSON.parse(localStorage.getItem(LS) || "{}");
           if (p.apiBase != null) $("api-base").value = p.apiBase;
-          if (p.userId != null) $("user-id").value = p.userId;
-          if (p.threadId != null) $("thread-id").value = p.threadId;
-          if (p.workspaceId != null) $("workspace-id").value = p.workspaceId;
+          if (p.userId != null) $("user-id").value = 1 || p.userId;
+          if (p.threadId != null) $("thread-id").value = 1 || p.threadId;
+          if (p.workspaceId != null) $("workspace-id").value = 1 || p.workspaceId;
         } catch (ign) {}
       }
       function savePrefs() {
@@ -1399,6 +1399,14 @@
         msgInput.style.height = Math.min(msgInput.scrollHeight, 200) + "px";
       }
       msgInput.addEventListener("input", autosize);
+      msgInput.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" || e.shiftKey) return;
+        e.preventDefault();
+        if (sendBtn.disabled) return;
+        const text = msgInput.value.trim();
+        if (!text) return;
+        form.requestSubmit();
+      });
 
       loadPrefs();
       setMode("doc");
